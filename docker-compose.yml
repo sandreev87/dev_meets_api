@@ -1,0 +1,36 @@
+version: '3.9'
+
+services:
+
+  dm_postgres:
+    container_name: postgres
+    image: postgres
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER
+      - POSTGRES_PASSWORD
+      - POSTGRES_DB
+    networks:
+      - ps
+
+  app:
+    build: .
+    container_name: app
+    image: app
+    environment:
+      - ENV
+      - POSTGRES_USER
+      - POSTGRES_PASSWORD
+      - POSTGRES_DB
+    ports:
+      - "8082:8082"
+    depends_on:
+      - dm_postgres
+    networks:
+      - ps
+
+networks:
+  ps:
+volumes:
+  pg-data:

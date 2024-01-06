@@ -1,0 +1,111 @@
+definitions:
+  rest.ErrResponse:
+    properties:
+      status:
+        example: wrong_params, internal_server_error
+        type: string
+    type: object
+  rest.OkResponse:
+    properties:
+      profile:
+        $ref: '#/definitions/rest.ProfileResponse'
+      status:
+        example: ok
+        type: string
+    type: object
+  rest.ProfileResponse:
+    properties:
+      email:
+        example: email@gmail.com
+        type: string
+    type: object
+  rest.SignInOkResponse:
+    properties:
+      status:
+        example: ok
+        type: string
+      token:
+        example: adsghjyjh5effa234353ty...
+        type: string
+    type: object
+  rest.SignUpOkResponse:
+    properties:
+      id:
+        example: 123
+        type: integer
+      status:
+        example: ok
+        type: string
+    type: object
+  rest.signInUpInput:
+    properties:
+      email:
+        example: email@gmail.com
+        type: string
+      password:
+        example: password
+        type: string
+    required:
+    - email
+    - password
+    type: object
+info:
+  contact: {}
+paths:
+  /api/v1/personal-profile:
+    get:
+      responses:
+        "200":
+          description: Параметры текущего пользователя
+          schema:
+            $ref: '#/definitions/rest.OkResponse'
+        "201":
+          description: Внутренняя ошибка сервиса
+          schema:
+            $ref: '#/definitions/rest.ErrResponse'
+      summary: Профиль текущего пользователя
+      tags:
+      - Пользователь
+  /api/v1/sign-in:
+    post:
+      parameters:
+      - description: Почта и Пароль
+        in: body
+        name: Request
+        required: true
+        schema:
+          $ref: '#/definitions/rest.signInUpInput'
+      responses:
+        "200":
+          description: Успешная авторизация
+          schema:
+            $ref: '#/definitions/rest.SignInOkResponse'
+        "201":
+          description: Ошибка при попытке авторизоваться
+          schema:
+            $ref: '#/definitions/rest.ErrResponse'
+      summary: Авторизация пользователя
+      tags:
+      - Авторизация
+  /api/v1/sign-up:
+    post:
+      parameters:
+      - description: Почта и Пароль
+        in: body
+        name: Request
+        required: true
+        schema:
+          $ref: '#/definitions/rest.signInUpInput'
+      responses:
+        "200":
+          description: Успешная регистрация нового пользователя
+          schema:
+            $ref: '#/definitions/rest.SignUpOkResponse'
+        "201":
+          description: Ошибка при попытке зарегистрироваться
+          schema:
+            $ref: '#/definitions/rest.ErrResponse'
+      summary: Регистрация нового пользователя
+      tags:
+      - Регистрация
+swagger: "2.0"
