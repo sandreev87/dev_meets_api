@@ -1,6 +1,6 @@
 .PHONY: prep
 prep:
-	docker-compose build
+	docker-compose build --no-cache
 
 .PHONY: start
 start_local:

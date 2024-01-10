@@ -37,7 +37,7 @@ func (r *UserPostgres) CreateUser(user models.User) (int, error) {
 }
 
 func (r *UserPostgres) UserByEmail(email string) (models.User, error) {
-	const op = "repository.AuthPostgres.User"
+	const op = "repository.AuthPostgres.UserByEmail"
 	var user models.User
 
 	err := r.db.QueryRow("SELECT id, email, pass_hash FROM users WHERE email = $1", email).
@@ -54,7 +54,7 @@ func (r *UserPostgres) UserByEmail(email string) (models.User, error) {
 }
 
 func (r *UserPostgres) User(id int) (models.User, error) {
-	const op = "repository.AuthPostgres.User"
+	const op = "repository.AuthPostgres.UserByEmail"
 	var user models.User
 
 	err := r.db.QueryRow("SELECT id, email, pass_hash FROM users WHERE id = $1", id).

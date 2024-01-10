@@ -13,6 +13,7 @@ import (
 type AuthorizationHandlerInt interface {
 	signUp(w http.ResponseWriter, r *http.Request)
 	signIn(w http.ResponseWriter, r *http.Request)
+	logout(w http.ResponseWriter, r *http.Request)
 	userIdentity(next http.Handler) http.Handler
 }
 
@@ -51,6 +52,7 @@ func (h *Handler) InitRoutes() *chi.Mux {
 
 			r.Post("/sign-up", h.AuthorizationHandlerInt.signUp)
 			r.Post("/sign-in", h.AuthorizationHandlerInt.signIn)
+			r.Delete("/logout", h.AuthorizationHandlerInt.logout)
 
 			r.Route("/personal-profile", func(r chi.Router) {
 				r.Use(h.AuthorizationHandlerInt.userIdentity)

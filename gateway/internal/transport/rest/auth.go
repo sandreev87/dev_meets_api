@@ -3,7 +3,6 @@ package rest
 import (
 	"dev_meets/internal/domain/models"
 	"dev_meets/internal/transport"
-	"dev_meets/pkg/jwt"
 	"errors"
 	"github.com/go-chi/render"
 	"github.com/go-playground/validator/v10"
@@ -158,6 +157,29 @@ func (h *AuthHandler) signIn(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *AuthHandler) logout(w http.ResponseWriter, r *http.Request) {
+	if r.Header["Authorization"] == nil {
+		h.logger.Error("invalid params")
+		render.JSON(w, r, ErrResponse{
+			Status: "wrong_params",
+		})
+		return
+	}
+
+	authorization := r.Header.Get("Authorization")
+	token := strings.TrimSpace(strings.Replace(authorization, "Bearer", "", 1))
+	if err := h.services.Logout(token); err != nil {
+		h.logger.Error("internal error", err)
+		render.JSON(w, r, ErrResponse{
+			Status: "internal_server_error",
+		})
+		return
+	}
+	render.JSON(w, r, OkResponse{
+		Status: "ok",
+	})
+}
+
 func (h *AuthHandler) userIdentity(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header["Authorization"] == nil {
@@ -167,12 +189,12 @@ func (h *AuthHandler) userIdentity(next http.Handler) http.Handler {
 
 		authorization := r.Header.Get("Authorization")
 		token := strings.TrimSpace(strings.Replace(authorization, "Bearer", "", 1))
-		if _, err := jwt.VerifyToken(token); err != nil {
+		if err := h.services.Verify(token); err != nil {
 			e := slog.Attr{
 				Key:   "error",
 				Value: slog.StringValue(err.Error()),
 			}
-			h.logger.Error("failed to decode token", e)
+			h.logger.Error("failed to verify token", e)
 			w.WriteHeader(http.StatusUnauthorized)
 		} else {
 			next.ServeHTTP(w, r)

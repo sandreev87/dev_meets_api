@@ -21,7 +21,7 @@ type ProfileResponse struct {
 	Email string `json:"email" example:"email@gmail.com"`
 }
 
-type OkResponse struct {
+type OkProfileResponse struct {
 	Status  string          `json:"status" example:"ok"`
 	Profile ProfileResponse `json:"profile"`
 }
@@ -29,7 +29,7 @@ type OkResponse struct {
 // Профиль текущего пользователя
 // @Summary Профиль текущего пользователя
 // @Tags Пользователь
-// @Success 200 {object} OkResponse "Параметры текущего пользователя"
+// @Success 200 {object} OkProfileResponse "Параметры текущего пользователя"
 // @Failure 201 {object} ErrResponse "Внутренняя ошибка сервиса"
 // @Router /api/v1/personal-profile [get]
 func (h *ProfileHandler) PersonalProfile(w http.ResponseWriter, r *http.Request) {
@@ -43,7 +43,7 @@ func (h *ProfileHandler) PersonalProfile(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	response := OkResponse{
+	response := OkProfileResponse{
 		Status: "ok",
 		Profile: ProfileResponse{
 			Email: user.Email,

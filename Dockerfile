@@ -11,13 +11,11 @@ RUN go mod download
 # build
 COPY gateway ./
 RUN go build -o ./bin/app cmd/app/main.go
-RUN go build -o ./bin/migrator cmd/migrator/main.go
 
 FROM alpine AS runner
 
 COPY --from=builder /usr/local/src/bin/app /
-COPY --from=builder /usr/local/src/bin/migrator /
 COPY --from=builder /usr/local/src/configs /configs
+COPY --from=builder /usr/local/src/migrations /migrations
 
-CMD ["/migrator"]
 CMD ["/app"]

@@ -19,12 +19,13 @@ var (
 )
 
 type AuthService struct {
-	repo   UserStorageInt
-	logger *slog.Logger
+	repo      UserStorageInt
+	RedisRepo RedisStorageInt
+	logger    *slog.Logger
 }
 
-func NewAuthService(repo UserStorageInt, logger *slog.Logger) *AuthService {
-	return &AuthService{repo: repo, logger: logger}
+func NewAuthService(repo UserStorageInt, redis RedisStorageInt, logger *slog.Logger) *AuthService {
+	return &AuthService{repo: repo, RedisRepo: redis, logger: logger}
 }
 
 func (s *AuthService) Login(email, password string) (string, error) {
@@ -51,8 +52,27 @@ func (s *AuthService) Login(email, password string) (string, error) {
 
 		return "", fmt.Errorf("%s: %w", op, err)
 	}
+	if err := s.RedisRepo.SetUserId(token, user.ID, tokenTTL); err != nil {
+		return "", fmt.Errorf("%s: %w", op, err)
+	}
 
 	return token, nil
+}
+
+func (s *AuthService) Verify(token string) error {
+	const op = "service.AuthService.Verify"
+
+	if _, err := jwt.VerifyToken(token); err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+	uid, err := s.RedisRepo.GetUserId(token)
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+	if uid == "" {
+		return fmt.Errorf("user is not found")
+	}
+	return nil
 }
 
 func (s *AuthService) RegisterNewUser(user models.User, pass string) (int, error) {
@@ -67,4 +87,14 @@ func (s *AuthService) RegisterNewUser(user models.User, pass string) (int, error
 	user.PassHash = string(passHash)
 
 	return s.repo.CreateUser(user)
+}
+
+func (s *AuthService) Logout(token string) error {
+	const op = "service.AuthService.Logout"
+
+	err := s.RedisRepo.DeleteUser(token)
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+	return nil
 }

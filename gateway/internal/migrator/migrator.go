@@ -1,4 +1,4 @@
-package main
+package migrator
 
 import (
 	"dev_meets/internal/config"
@@ -9,9 +9,7 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 )
 
-func main() {
-	cfg := config.MustLoad()
-
+func Run(cfg *config.Config) {
 	m, err := migrate.New(
 		"file://"+cfg.Postgresql.MigrationsPath,
 		fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable",

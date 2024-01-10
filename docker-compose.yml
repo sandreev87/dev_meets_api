@@ -12,8 +12,17 @@ services:
       - POSTGRES_PASSWORD
       - POSTGRES_DB
     networks:
-      - ps
-
+      - dm
+  dm_redis:
+    image: "redis:latest"
+    container_name: redis
+    hostname: redis
+    volumes:
+      - redisDB:/var/lib/data
+    networks:
+      - dm
+    ports:
+      - "6378:6379"
   app:
     build: .
     container_name: app
@@ -27,10 +36,12 @@ services:
       - "8082:8082"
     depends_on:
       - dm_postgres
+      - dm_redis
     networks:
-      - ps
+      - dm
 
 networks:
-  ps:
+  dm:
 volumes:
   pg-data:
+  redisDB:

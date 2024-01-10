@@ -15,12 +15,12 @@ type Config struct {
 }
 
 type Postgresql struct {
-	Host           string `yaml:"host" env-default:""`
-	Port           int    `yaml:"port" env-default:""`
+	Host           string `yaml:"host" env-default:"0.0.0.0"`
+	Port           int    `yaml:"port" env-default:"5432"`
 	User           string `env-default:""`
 	Password       string `env-default:""`
 	DB             string `env-default:""`
-	MigrationsPath string `yaml:"migrations_path" env-default:""`
+	MigrationsPath string `yaml:"migrations_path" env-default:"/migrations"`
 }
 
 type HTTPServer struct {

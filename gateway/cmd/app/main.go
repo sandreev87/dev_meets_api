@@ -3,6 +3,7 @@ package main
 import (
 	"dev_meets/internal/app"
 	"dev_meets/internal/config"
+	"dev_meets/internal/migrator"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -17,8 +18,9 @@ const (
 
 func main() {
 	cfg := config.MustLoad()
-
 	log := setupLogger(cfg.Env)
+
+	migrator.Run(cfg)
 
 	application := app.New(log, cfg)
 
