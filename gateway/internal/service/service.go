@@ -1,6 +1,7 @@
 package service
 
 import (
+	"dev_meets/internal/config"
 	"dev_meets/internal/storage"
 	"log/slog"
 )
@@ -10,9 +11,9 @@ type Service struct {
 	*UserService
 }
 
-func NewService(repos *storage.Repository, logger *slog.Logger) *Service {
+func NewService(repos *storage.Repository, conf *config.Config, logger *slog.Logger) *Service {
 	return &Service{
-		AuthService: NewAuthService(repos.UserPostgres, repos.UserRedis, logger),
-		UserService: NewUserService(repos.UserPostgres, logger),
+		AuthService: NewAuthService(repos.UserPostgres, repos.UserRedis, conf, logger),
+		UserService: NewUserService(repos.UserPostgres, conf, logger),
 	}
 }

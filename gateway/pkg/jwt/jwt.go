@@ -7,11 +7,7 @@ import (
 	"time"
 )
 
-const (
-	SECRET = "hjqrhjqw124617ajfhajs"
-)
-
-func NewToken(user models.User, duration time.Duration) (string, error) {
+func NewToken(user models.User, secret string, duration time.Duration) (string, error) {
 	token := jwt.New(jwt.SigningMethodHS256)
 
 	claims := token.Claims.(jwt.MapClaims)
@@ -19,7 +15,7 @@ func NewToken(user models.User, duration time.Duration) (string, error) {
 	claims["email"] = user.Email
 	claims["exp"] = time.Now().Add(duration).Unix()
 
-	tokenString, err := token.SignedString([]byte(SECRET))
+	tokenString, err := token.SignedString([]byte(secret))
 	if err != nil {
 		return "", err
 	}
@@ -27,13 +23,13 @@ func NewToken(user models.User, duration time.Duration) (string, error) {
 	return tokenString, nil
 }
 
-func VerifyToken(tokenString string) (int, error) {
+func VerifyToken(tokenString, secret string) (int, error) {
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return "", fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
 
-		return []byte(SECRET), nil
+		return []byte(secret), nil
 	})
 
 	if err != nil {

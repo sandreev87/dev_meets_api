@@ -10,6 +10,7 @@ import (
 
 type Config struct {
 	Env        string `env-default:"local"`
+	Secret     string `env-default:"1234"`
 	Postgresql `yaml:"postgresql"`
 	HTTPServer `yaml:"http_server"`
 }
@@ -36,6 +37,7 @@ func MustLoad() *Config {
 	pgUser := os.Getenv("POSTGRES_USER")
 	pgPassword := os.Getenv("POSTGRES_PASSWORD")
 	pgDB := os.Getenv("POSTGRES_DB")
+	secret := os.Getenv("SECRET")
 
 	if env == "" || pgUser == "" || pgPassword == "" || pgDB == "" {
 		log.Fatal("required env variables are not set")
@@ -56,6 +58,7 @@ func MustLoad() *Config {
 		cfg.Postgresql.User = pgUser
 		cfg.Postgresql.Password = pgPassword
 		cfg.Postgresql.DB = pgDB
+		cfg.Secret = secret
 	}
 
 	return &cfg

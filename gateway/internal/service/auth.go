@@ -1,6 +1,7 @@
 package service
 
 import (
+	"dev_meets/internal/config"
 	"dev_meets/internal/domain/models"
 	"dev_meets/pkg/jwt"
 	"errors"
@@ -21,11 +22,12 @@ var (
 type AuthService struct {
 	repo      UserStorageInt
 	RedisRepo RedisStorageInt
+	conf      *config.Config
 	logger    *slog.Logger
 }
 
-func NewAuthService(repo UserStorageInt, redis RedisStorageInt, logger *slog.Logger) *AuthService {
-	return &AuthService{repo: repo, RedisRepo: redis, logger: logger}
+func NewAuthService(repo UserStorageInt, redis RedisStorageInt, conf *config.Config, logger *slog.Logger) *AuthService {
+	return &AuthService{repo: repo, RedisRepo: redis, conf: conf, logger: logger}
 }
 
 func (s *AuthService) Login(email, password string) (string, error) {
@@ -46,7 +48,7 @@ func (s *AuthService) Login(email, password string) (string, error) {
 
 	s.logger.Info("user logged in successfully")
 
-	token, err := jwt.NewToken(user, tokenTTL)
+	token, err := jwt.NewToken(user, s.conf.Secret, tokenTTL)
 	if err != nil {
 		s.logger.Error("failed to generate token")
 
@@ -62,7 +64,7 @@ func (s *AuthService) Login(email, password string) (string, error) {
 func (s *AuthService) Verify(token string) error {
 	const op = "service.AuthService.Verify"
 
-	if _, err := jwt.VerifyToken(token); err != nil {
+	if _, err := jwt.VerifyToken(token, s.conf.Secret); err != nil {
 		return fmt.Errorf("%s: %w", op, err)
 	}
 	uid, err := s.RedisRepo.GetUserId(token)

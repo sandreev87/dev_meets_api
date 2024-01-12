@@ -27,7 +27,7 @@ func New(
 	conf *config.Config,
 ) *App {
 	repos := storage.NewRepository(conf, log)
-	services := service.NewService(repos, log)
+	services := service.NewService(repos, conf, log)
 	handlers := rest.NewHandler(services, log)
 	router := handlers.InitRoutes()
 
