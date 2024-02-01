@@ -10,11 +10,12 @@ RUN go mod download
 
 # build
 COPY rooms ./
-RUN go build -o ./bin/rooms cmd/main.go
+RUN go build -o ./bin/rooms cmd/app/main.go
 
 FROM alpine AS runner
 
 COPY --from=builder /usr/local/src/bin/rooms /
+COPY --from=builder /usr/local/src/configs /configs
 COPY --from=builder /usr/local/src/index.html /
 
 CMD ["/rooms"]

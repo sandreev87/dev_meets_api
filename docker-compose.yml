@@ -63,7 +63,8 @@ services:
     container_name: rooms1
     image: rooms
     environment:
-      HTTP_PORT: 8083
+      - HTTP_PORT=8083
+      - ENV
     ports:
       - "8083:8083"
     networks:
@@ -76,7 +77,8 @@ services:
     container_name: rooms2
     image: rooms
     environment:
-      HTTP_PORT: 8084
+      - HTTP_PORT=8084
+      - ENV
     ports:
       - "8084:8084"
     networks:
@@ -89,7 +91,8 @@ services:
     container_name: rooms3
     image: rooms
     environment:
-      HTTP_PORT: 8085
+      - HTTP_PORT=8085
+      - ENV
     ports:
       - "8085:8085"
     networks:
