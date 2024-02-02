@@ -50,7 +50,7 @@ func (a *App) Run() {
 	go dispatchKeyFrames()
 	go func() {
 		if err := a.HTTPServer.ListenAndServe(); err != nil {
-			a.logger.Error("failed to start server")
+			a.logger.Error("failed to start server", err)
 		}
 	}()
 

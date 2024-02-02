@@ -10,12 +10,12 @@ RUN go mod download
 
 # build
 COPY auth ./
-RUN go build -o ./bin/app cmd/app/main.go
+RUN go build -o ./bin/auth cmd/app/main.go
 
 FROM alpine AS runner
 
-COPY --from=builder /usr/local/src/bin/app /
+COPY --from=builder /usr/local/src/bin/auth /
 COPY --from=builder /usr/local/src/configs /configs
 COPY --from=builder /usr/local/src/migrations /migrations
 
-CMD ["/app"]
+CMD ["/auth"]

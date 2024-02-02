@@ -19,12 +19,6 @@ var (
 var (
 	turnConfig = webrtc.Configuration{
 		ICETransportPolicy: webrtc.ICETransportPolicyRelay,
-		ICEServers: []webrtc.ICEServer{
-			{
-
-				URLs: []string{"stun:turn.localhost:3478"},
-			},
-		},
 	}
 )
 

@@ -45,7 +45,7 @@ func (h *Handler) InitRoutes() *chi.Mux {
 	router.Get("/room/{roomID}", func(w http.ResponseWriter, r *http.Request) {
 		roomId := chi.URLParam(r, "roomID")
 		_, _ = createOrGetRoom(roomId)
-		if err := indexTemplate.Execute(w, "ws://"+r.Host+"/websocket/room/"+roomId); err != nil {
+		if err := indexTemplate.Execute(w, "wss://"+r.Host+"/websocket/room/"+roomId); err != nil {
 			log.Fatal(err)
 		}
 	})
