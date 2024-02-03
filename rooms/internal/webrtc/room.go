@@ -1,139 +1,143 @@
 package webrtc
 
 import (
-	"encoding/json"
-	"log"
-	"os"
-	"sync"
-
-	"github.com/gorilla/websocket"
+	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v3"
+	"log"
+	"sync"
+	"time"
 )
 
-func RoomConn(c *websocket.Conn, p *Peers) {
-	var config webrtc.Configuration
-	if os.Getenv("ENVIRONMENT") == "PRODUCTION" {
-		config = turnConfig
+type Room struct {
+	ListLock    sync.RWMutex
+	Connections []PeerConnectionState
+	TrackLocals map[string]*webrtc.TrackLocalStaticRTP
+}
+
+func NewRoom() *Room {
+	return &Room{
+		TrackLocals: make(map[string]*webrtc.TrackLocalStaticRTP),
 	}
-	peerConnection, err := webrtc.NewPeerConnection(config)
+}
+
+func (r *Room) AddTrack(t *webrtc.TrackRemote) *webrtc.TrackLocalStaticRTP {
+	r.ListLock.Lock()
+	defer func() {
+		r.ListLock.Unlock()
+		r.SignalPeerConnections()
+	}()
+
+	trackLocal, err := webrtc.NewTrackLocalStaticRTP(t.Codec().RTPCodecCapability, t.ID(), t.StreamID())
 	if err != nil {
-		log.Print(err)
-		return
-	}
-	defer peerConnection.Close()
-
-	for _, typ := range []webrtc.RTPCodecType{webrtc.RTPCodecTypeVideo, webrtc.RTPCodecTypeAudio} {
-		if _, err := peerConnection.AddTransceiverFromKind(typ, webrtc.RTPTransceiverInit{
-			Direction: webrtc.RTPTransceiverDirectionRecvonly,
-		}); err != nil {
-			log.Print(err)
-			return
-		}
+		log.Println(err.Error())
+		return nil
 	}
 
-	newPeer := PeerConnectionState{
-		PeerConnection: peerConnection,
-		Websocket: &ThreadSafeWriter{
-			Conn:  c,
-			Mutex: sync.Mutex{},
-		}}
+	r.TrackLocals[t.ID()] = trackLocal
+	return trackLocal
+}
 
-	// Add our new PeerConnection to global list
-	p.ListLock.Lock()
-	p.Connections = append(p.Connections, newPeer)
-	p.ListLock.Unlock()
+func (r *Room) RemoveTrack(t *webrtc.TrackLocalStaticRTP) {
+	r.ListLock.Lock()
+	defer func() {
+		r.ListLock.Unlock()
+		r.SignalPeerConnections()
+	}()
 
-	log.Println(p.Connections)
+	delete(r.TrackLocals, t.ID())
+}
 
-	// Trickle ICE. Emit server candidate to client
-	peerConnection.OnICECandidate(func(i *webrtc.ICECandidate) {
-		if i == nil {
+func (r *Room) SignalPeerConnections() {
+	r.ListLock.Lock()
+	defer func() {
+		r.ListLock.Unlock()
+		r.DispatchKeyFrame()
+	}()
+
+	for syncAttempt := 0; ; syncAttempt++ {
+		if syncAttempt == 25 {
+			go func() {
+				time.Sleep(time.Second * 3)
+				r.SignalPeerConnections()
+			}()
 			return
 		}
 
-		candidateString, err := json.Marshal(i.ToJSON())
-		if err != nil {
-			log.Println(err)
-			return
+		if r.attemptSync() {
+			break
+		}
+	}
+}
+
+func (r *Room) attemptSync() bool {
+	for i := range r.Connections {
+		if r.Connections[i].PeerConnection.ConnectionState() == webrtc.PeerConnectionStateClosed {
+			r.Connections = append(r.Connections[:i], r.Connections[i+1:]...)
+			return false
 		}
 
-		if writeErr := newPeer.Websocket.WriteJSON(&websocketMessage{
-			Event: "candidate",
-			Data:  string(candidateString),
-		}); writeErr != nil {
-			log.Println(writeErr)
-		}
-	})
-
-	// If PeerConnection is closed remove it from global list
-	peerConnection.OnConnectionStateChange(func(pp webrtc.PeerConnectionState) {
-		switch pp {
-		case webrtc.PeerConnectionStateFailed:
-			if err := peerConnection.Close(); err != nil {
-				log.Print(err)
-			}
-		case webrtc.PeerConnectionStateClosed:
-			p.SignalPeerConnections()
-		}
-	})
-
-	peerConnection.OnTrack(func(t *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
-		// Create a track to fan out our incoming video to all peers
-		trackLocal := p.AddTrack(t)
-		if trackLocal == nil {
-			return
-		}
-		defer p.RemoveTrack(trackLocal)
-
-		buf := make([]byte, 1500)
-		for {
-			i, _, err := t.Read(buf)
-			if err != nil {
-				return
+		existingSenders := map[string]struct{}{}
+		for _, sender := range r.Connections[i].PeerConnection.GetSenders() {
+			if sender.Track() == nil {
+				continue
 			}
 
-			_, err = trackLocal.Write(buf[:i])
-			if err != nil {
-				return
+			existingSenders[sender.Track().ID()] = struct{}{}
+
+			if _, ok := r.TrackLocals[sender.Track().ID()]; !ok {
+				if err := r.Connections[i].PeerConnection.RemoveTrack(sender); err != nil {
+					return false
+				}
 			}
 		}
-	})
 
-	p.SignalPeerConnections()
-	message := &websocketMessage{}
-	for {
-		_, raw, err := c.ReadMessage()
-		if err != nil {
-			log.Println(err)
-			return
-		} else if err := json.Unmarshal(raw, &message); err != nil {
-			log.Println(err)
-			return
+		for _, receiver := range r.Connections[i].PeerConnection.GetReceivers() {
+			if receiver.Track() == nil {
+				continue
+			}
+
+			existingSenders[receiver.Track().ID()] = struct{}{}
 		}
 
-		switch message.Event {
-		case "candidate":
-			candidate := webrtc.ICECandidateInit{}
-			if err := json.Unmarshal([]byte(message.Data), &candidate); err != nil {
-				log.Println(err)
-				return
+		for trackID := range r.TrackLocals {
+			if _, ok := existingSenders[trackID]; !ok {
+				if _, err := r.Connections[i].PeerConnection.AddTrack(r.TrackLocals[trackID]); err != nil {
+					return false
+				}
+			}
+		}
+
+		if r.Connections[i].ShouldSendOffer() {
+			if err := r.Connections[i].SendOffer(); err != nil {
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
+func (r *Room) AddPeerConnection(newPeer *PeerConnectionState) {
+	r.ListLock.Lock()
+	r.Connections = append(r.Connections, *newPeer)
+	r.ListLock.Unlock()
+}
+
+func (r *Room) DispatchKeyFrame() {
+	r.ListLock.Lock()
+	defer r.ListLock.Unlock()
+
+	for i := range r.Connections {
+		for _, receiver := range r.Connections[i].PeerConnection.GetReceivers() {
+			if receiver.Track() == nil {
+				continue
 			}
 
-			if err := peerConnection.AddICECandidate(candidate); err != nil {
-				log.Println(err)
-				return
-			}
-		case "answer":
-			answer := webrtc.SessionDescription{}
-			if err := json.Unmarshal([]byte(message.Data), &answer); err != nil {
-				log.Println(err)
-				return
-			}
-
-			if err := peerConnection.SetRemoteDescription(answer); err != nil {
-				log.Println(err)
-				return
-			}
+			_ = r.Connections[i].PeerConnection.WriteRTCP([]rtcp.Packet{
+				&rtcp.PictureLossIndication{
+					MediaSSRC: uint32(receiver.Track().SSRC()),
+				},
+			})
 		}
 	}
 }

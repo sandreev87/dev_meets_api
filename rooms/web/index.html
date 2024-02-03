@@ -40,7 +40,7 @@
           el.play()
         }
 
-        event.streams[0].onremovetrack = ({track}) => {
+        event.streams[0].onremovetrack = ({_track}) => {
           if (el.parentNode) {
             el.parentNode.removeChild(el)
           }

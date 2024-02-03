@@ -16,6 +16,6 @@ FROM alpine AS runner
 
 COPY --from=builder /usr/local/src/bin/rooms /
 COPY --from=builder /usr/local/src/configs /configs
-COPY --from=builder /usr/local/src/index.html /
+COPY --from=builder /usr/local/src/web /web
 
 CMD ["/rooms"]

@@ -56,11 +56,11 @@ services:
     networks:
       - dm
 
-  rooms1:
+  rooms:
     build:
       context: .
       dockerfile: rooms/Dockerfile
-    container_name: rooms1
+    container_name: rooms
     image: rooms
     environment:
       - HTTP_PORT=8083
@@ -68,17 +68,6 @@ services:
     networks:
       - dm
 
-  rooms2:
-    build:
-      context: .
-      dockerfile: rooms/Dockerfile
-    container_name: rooms2
-    image: rooms
-    environment:
-      - HTTP_PORT=8084
-      - ENV
-    networks:
-      - dm
 networks:
   dm:
 volumes:
