@@ -2,6 +2,7 @@ package storage
 
 import (
 	"auth/internal/domain/models"
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -18,11 +19,11 @@ func NewUserPostgres(db *sql.DB, logger *slog.Logger) *UserPostgres {
 	return &UserPostgres{db: db, log: logger}
 }
 
-func (r *UserPostgres) CreateUser(user models.User) (int, error) {
+func (r *UserPostgres) CreateUser(ctx context.Context, user models.User) (int, error) {
 	const op = "repository.AuthPostgres.CreateUser"
 
 	var id int
-	err := r.db.QueryRow("INSERT INTO users(email, pass_hash) VALUES($1, $2) RETURNING id", user.Email, user.PassHash).Scan(&id)
+	err := r.db.QueryRowContext(ctx, "INSERT INTO users(email, pass_hash) VALUES($1, $2) RETURNING id", user.Email, user.PassHash).Scan(&id)
 
 	if err != nil {
 		var pgsErr *pq.Error
@@ -36,11 +37,11 @@ func (r *UserPostgres) CreateUser(user models.User) (int, error) {
 	return id, nil
 }
 
-func (r *UserPostgres) UserByEmail(email string) (models.User, error) {
+func (r *UserPostgres) UserByEmail(ctx context.Context, email string) (models.User, error) {
 	const op = "repository.AuthPostgres.UserByEmail"
 	var user models.User
 
-	err := r.db.QueryRow("SELECT id, email, pass_hash FROM users WHERE email = $1", email).
+	err := r.db.QueryRowContext(ctx, "SELECT id, email, pass_hash FROM users WHERE email = $1", email).
 		Scan(&user.ID, &user.Email, &user.PassHash)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -53,11 +54,11 @@ func (r *UserPostgres) UserByEmail(email string) (models.User, error) {
 	return user, nil
 }
 
-func (r *UserPostgres) User(id int) (models.User, error) {
+func (r *UserPostgres) User(ctx context.Context, id int) (models.User, error) {
 	const op = "repository.AuthPostgres.UserByEmail"
 	var user models.User
 
-	err := r.db.QueryRow("SELECT id, email, pass_hash FROM users WHERE id = $1", id).
+	err := r.db.QueryRowContext(ctx, "SELECT id, email, pass_hash FROM users WHERE id = $1", id).
 		Scan(&user.ID, &user.Email, &user.PassHash)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

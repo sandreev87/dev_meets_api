@@ -4,6 +4,7 @@ import (
 	"auth/internal/config"
 	"auth/internal/domain/models"
 	"auth/pkg/jwt"
+	"context"
 	"errors"
 	"fmt"
 	"golang.org/x/crypto/bcrypt"
@@ -30,12 +31,12 @@ func NewAuthService(repo UserStorageInt, redis RedisStorageInt, conf *config.Con
 	return &AuthService{repo: repo, RedisRepo: redis, conf: conf, logger: logger}
 }
 
-func (s *AuthService) Login(email, password string) (string, error) {
+func (s *AuthService) Login(ctx context.Context, email, password string) (string, error) {
 	const op = "service.AuthService.Login"
 
 	s.logger.Info("attempting to login user")
 
-	user, err := s.repo.UserByEmail(email)
+	user, err := s.repo.UserByEmail(ctx, email)
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", op, err)
 	}
@@ -54,20 +55,20 @@ func (s *AuthService) Login(email, password string) (string, error) {
 
 		return "", fmt.Errorf("%s: %w", op, err)
 	}
-	if err := s.RedisRepo.SetUserId(token, user.ID, tokenTTL); err != nil {
+	if err := s.RedisRepo.SetUserId(ctx, token, user.ID, tokenTTL); err != nil {
 		return "", fmt.Errorf("%s: %w", op, err)
 	}
 
 	return token, nil
 }
 
-func (s *AuthService) Verify(token string) error {
+func (s *AuthService) Verify(ctx context.Context, token string) error {
 	const op = "service.AuthService.Verify"
 
 	if _, err := jwt.VerifyToken(token, s.conf.Secret); err != nil {
 		return fmt.Errorf("%s: %w", op, err)
 	}
-	uid, err := s.RedisRepo.GetUserId(token)
+	uid, err := s.RedisRepo.GetUserId(ctx, token)
 	if err != nil {
 		return fmt.Errorf("%s: %w", op, err)
 	}
@@ -77,7 +78,7 @@ func (s *AuthService) Verify(token string) error {
 	return nil
 }
 
-func (s *AuthService) RegisterNewUser(user models.User, pass string) (int, error) {
+func (s *AuthService) RegisterNewUser(ctx context.Context, user models.User, pass string) (int, error) {
 	const op = "service.AuthService.RegisterNewUser"
 
 	passHash, err := bcrypt.GenerateFromPassword([]byte(pass), bcrypt.DefaultCost)
@@ -88,13 +89,13 @@ func (s *AuthService) RegisterNewUser(user models.User, pass string) (int, error
 	}
 	user.PassHash = string(passHash)
 
-	return s.repo.CreateUser(user)
+	return s.repo.CreateUser(ctx, user)
 }
 
-func (s *AuthService) Logout(token string) error {
+func (s *AuthService) Logout(ctx context.Context, token string) error {
 	const op = "service.AuthService.Logout"
 
-	err := s.RedisRepo.DeleteUser(token)
+	err := s.RedisRepo.DeleteUser(ctx, token)
 	if err != nil {
 		return fmt.Errorf("%s: %w", op, err)
 	}

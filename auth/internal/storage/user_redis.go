@@ -16,9 +16,7 @@ func NewUserRedis(client *redis.Client, logger *slog.Logger) *UserRedis {
 	return &UserRedis{client: client, log: logger}
 }
 
-func (r *UserRedis) GetUserId(tokenId string) (string, error) {
-	var ctx = context.Background()
-
+func (r *UserRedis) GetUserId(ctx context.Context, tokenId string) (string, error) {
 	id, err := r.client.Get(ctx, tokenId).Result()
 	r.log.Info(id)
 	if err != nil {
@@ -27,18 +25,14 @@ func (r *UserRedis) GetUserId(tokenId string) (string, error) {
 	return id, nil
 }
 
-func (r *UserRedis) SetUserId(tokenId string, id int, duration time.Duration) error {
-	var ctx = context.Background()
-
+func (r *UserRedis) SetUserId(ctx context.Context, tokenId string, id int, duration time.Duration) error {
 	err := r.client.Set(ctx, tokenId, id, duration).Err()
 	if err != nil {
 		return err
 	}
 	return nil
 }
-func (r *UserRedis) DeleteUser(tokenId string) error {
-	var ctx = context.Background()
-
+func (r *UserRedis) DeleteUser(ctx context.Context, tokenId string) error {
 	res, err := r.client.Del(ctx, tokenId).Result()
 	println("Number of keys deleted:", res)
 	if err != nil {

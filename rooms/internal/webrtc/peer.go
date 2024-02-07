@@ -1,6 +1,7 @@
 package webrtc
 
 import (
+	"context"
 	"encoding/json"
 	"github.com/pion/webrtc/v3"
 )
@@ -120,10 +121,12 @@ func (peer *PeerConnectionState) HandleEvent(event string, data string) error {
 	return nil
 }
 
-func (peer *PeerConnectionState) ListenEvents(callback func(string, string)) {
+func (peer *PeerConnectionState) ListenEvents(ctx context.Context, callback func(string, string)) {
 	go func() {
 		for {
 			select {
+			case <-ctx.Done():
+				break
 			case event := <-peer.InternalEventChan:
 				callback(event.Event, event.Data)
 			}

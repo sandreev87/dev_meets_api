@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"context"
 	"encoding/json"
 	"github.com/go-chi/chi/v5"
 	"log"
@@ -15,7 +16,6 @@ import (
 type RoomServiceInt interface {
 	CreateOrGetRoom(uuid string) (*wrtc.Room, error)
 	InitPeerConnection(room *wrtc.Room) (*wrtc.PeerConnectionState, error)
-	ListenEvents(*wrtc.PeerConnectionState, func(string, string))
 }
 
 type PeerInt interface {
@@ -54,26 +54,29 @@ func (h *RoomHandler) SignalHandler(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error(err.Error())
 		return
 	}
-
+	ctx, close := context.WithCancel(r.Context())
 	roomID := chi.URLParam(r, "roomID")
 	room, err := h.service.CreateOrGetRoom(roomID)
 	if err != nil {
 		h.logger.Error(err.Error())
+		close()
 		return
 	}
 	peer, err := h.service.InitPeerConnection(room)
 	if err != nil {
 		h.logger.Error(err.Error())
+		close()
 		return
 	}
 	defer func() {
 		if err := peer.Close(); err != nil {
 			h.logger.Error(err.Error())
 		}
+		close()
 	}()
 
 	loc := sync.Mutex{}
-	h.service.ListenEvents(peer, func(event string, data string) {
+	peer.ListenEvents(ctx, func(event string, data string) {
 		msg := &websocketMessage{
 			Event: event,
 			Data:  data,

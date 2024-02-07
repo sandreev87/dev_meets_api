@@ -33,9 +33,11 @@ type OkProfileResponse struct {
 // @Failure 201 {object} ErrResponse "Внутренняя ошибка сервиса"
 // @Router /api/v1/personal-profile [get]
 func (h *ProfileHandler) PersonalProfile(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
 	authorization := r.Header.Get("Authorization")
 	token := strings.TrimSpace(strings.Replace(authorization, "Bearer", "", 1))
-	user, err := h.services.CurrentUser(token)
+	user, err := h.services.CurrentUser(ctx, token)
 	if err != nil {
 		render.JSON(w, r, ErrResponse{
 			Status: "internal_server_error",

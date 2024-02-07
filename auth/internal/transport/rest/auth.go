@@ -39,6 +39,7 @@ type SignUpOkResponse struct {
 // @Failure 201 {object} ErrResponse "Ошибка при попытке зарегистрироваться"
 // @Router /api/v1/sign-up [post]
 func (h *AuthHandler) signUp(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	var input signInUpInput
 
 	err := render.DecodeJSON(r.Body, &input)
@@ -75,7 +76,7 @@ func (h *AuthHandler) signUp(w http.ResponseWriter, r *http.Request) {
 
 	user := models.User{Email: input.Email}
 
-	id, err := h.services.RegisterNewUser(user, input.Password)
+	id, err := h.services.RegisterNewUser(ctx, user, input.Password)
 	if err != nil {
 		e := slog.Attr{
 			Key:   "error",
@@ -107,6 +108,7 @@ type signInUpInput struct {
 // @Failure 201 {object} ErrResponse "Ошибка при попытке авторизоваться"
 // @Router /api/v1/sign-in [post]
 func (h *AuthHandler) signIn(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	var input signInUpInput
 
 	err := render.DecodeJSON(r.Body, &input)
@@ -142,7 +144,7 @@ func (h *AuthHandler) signIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := h.services.Login(input.Email, input.Password)
+	token, err := h.services.Login(ctx, input.Email, input.Password)
 	if err != nil {
 		h.logger.Error("internal error", err)
 		render.JSON(w, r, ErrResponse{
@@ -158,6 +160,8 @@ func (h *AuthHandler) signIn(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AuthHandler) logout(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
 	if r.Header["Authorization"] == nil {
 		h.logger.Error("invalid params")
 		render.JSON(w, r, ErrResponse{
@@ -168,7 +172,7 @@ func (h *AuthHandler) logout(w http.ResponseWriter, r *http.Request) {
 
 	authorization := r.Header.Get("Authorization")
 	token := strings.TrimSpace(strings.Replace(authorization, "Bearer", "", 1))
-	if err := h.services.Logout(token); err != nil {
+	if err := h.services.Logout(ctx, token); err != nil {
 		h.logger.Error("internal error", err)
 		render.JSON(w, r, ErrResponse{
 			Status: "internal_server_error",
@@ -182,6 +186,8 @@ func (h *AuthHandler) logout(w http.ResponseWriter, r *http.Request) {
 
 func (h *AuthHandler) userIdentity(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+
 		if r.Header["Authorization"] == nil {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
@@ -189,7 +195,7 @@ func (h *AuthHandler) userIdentity(next http.Handler) http.Handler {
 
 		authorization := r.Header.Get("Authorization")
 		token := strings.TrimSpace(strings.Replace(authorization, "Bearer", "", 1))
-		if err := h.services.Verify(token); err != nil {
+		if err := h.services.Verify(ctx, token); err != nil {
 			e := slog.Attr{
 				Key:   "error",
 				Value: slog.StringValue(err.Error()),

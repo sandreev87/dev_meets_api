@@ -108,10 +108,6 @@ func (s *RoomService) InitPeerConnection(room *wrtc.Room) (*wrtc.PeerConnectionS
 	return newPeer, nil
 }
 
-func (s *RoomService) ListenEvents(peer *wrtc.PeerConnectionState, callback func(string, string)) {
-	peer.ListenEvents(callback)
-}
-
 func (s *RoomService) CloseAllConnections() {
 	const op = "service.RoomService.CloseAllConnections"
 
