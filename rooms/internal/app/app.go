@@ -20,32 +20,30 @@ type RoomServiceInt interface {
 
 type App struct {
 	HTTPServer *http.Server
-	RoomServ   RoomServiceInt
+	roomServ   RoomServiceInt
 	logger     *slog.Logger
-	config     *config.Config
 }
 
 func New(
-	log *slog.Logger,
-	conf *config.Config,
+	logger *slog.Logger,
+	config *config.Config,
 ) *App {
 
-	services := service.NewService(log)
-	handlers := transport.NewHandler(services, log)
+	services := service.NewService(logger)
+	handlers := transport.NewHandler(services, logger)
 	router := handlers.InitRoutes()
 
-	log.Info("initializing server", slog.String("address", conf.HTTPServer.Address))
+	logger.Info("initializing server", slog.String("address", config.HTTPServer.Address))
 
 	srv := &http.Server{
-		Addr:    conf.HTTPServer.Address,
+		Addr:    config.HTTPServer.Address,
 		Handler: router,
 	}
 
 	return &App{
 		HTTPServer: srv,
-		RoomServ:   services.RoomService,
-		logger:     log,
-		config:     conf,
+		roomServ:   services.RoomService,
+		logger:     logger,
 	}
 }
 
@@ -55,7 +53,7 @@ func (a *App) Run() {
 	done := make(chan os.Signal, 1)
 	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 
-	go a.RoomServ.DispatchKeyFrames()
+	go a.roomServ.DispatchKeyFrames()
 	go func() {
 		if err := a.HTTPServer.ListenAndServe(); err != nil {
 			a.logger.Error("failed to start server", err)
@@ -75,7 +73,7 @@ func (a *App) Stop() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	a.RoomServ.CloseAllConnections()
+	a.roomServ.CloseAllConnections()
 	if err := a.HTTPServer.Shutdown(ctx); err != nil {
 		a.logger.Error("failed to stop server")
 

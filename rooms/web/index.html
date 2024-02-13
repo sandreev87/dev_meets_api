@@ -1,100 +1,149 @@
 <!DOCTYPE html>
 <html>
-  <!--
-    SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
-    SPDX-License-Identifier: MIT
-  -->
+<!--
+  SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+  SPDX-License-Identifier: MIT
+-->
 
-  <head>
-    <meta charset="utf-8">
-  </head>
-  <body>
-    <h3> Local Video </h3>
-    <video id="localVideo" width="160" height="120" autoplay muted></video> <br />
+<head>
+  <meta charset="utf-8">
+</head>
+<body>
+<h3> Local Video </h3>
+<video id="localVideo" width="160" height="120" autoplay muted></video> <br />
 
-    <h3> Remote Video </h3>
-    <div id="remoteVideos"></div> <br />
+<h3> Remote Video </h3>
+<div id="remoteVideos"></div> <br />
 
-    <h3> Logs </h3>
-    <div id="logs"></div>
+<h3> Logs </h3>
+<div id="logs"></div>
 
 
-  </body>
+</body>
 
-  <script>
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-    .then(stream => {
-      let pc = new RTCPeerConnection()
-      pc.ontrack = function (event) {
-        if (event.track.kind === 'audio') {
-          return
-        }
-
-        let el = document.createElement(event.track.kind)
-        el.srcObject = event.streams[0]
-        el.autoplay = true
-        el.controls = true
-        document.getElementById('remoteVideos').appendChild(el)
-
-        event.track.onmute = function(event) {
-          el.play()
-        }
-
-        event.streams[0].onremovetrack = ({_track}) => {
-          if (el.parentNode) {
-            el.parentNode.removeChild(el)
-          }
-        }
+<script>
+  navigator.mediaDevices.getUserMedia({ video: {
+      width: {
+        ideal: 2560
+      },
+      height: {
+        ideal: 1440
+      },
+      frameRate: {
+        ideal: 60,
+        min: 10
       }
+    }, audio: true })
+          .then(stream => {
+            document.getElementById('localVideo').srcObject = stream
 
-      document.getElementById('localVideo').srcObject = stream
-      stream.getTracks().forEach(track => pc.addTrack(track, stream))
+            let pc = new RTCPeerConnection()
+            pc.ontrack = function (event) {
+              if (event.track.kind === 'audio') {
+                return
+              }
 
-      let ws = new WebSocket("{{.}}")
-      pc.onicecandidate = e => {
-        if (!e.candidate) {
-          return
-        }
+              let el = document.createElement(event.track.kind)
+              el.srcObject = event.streams[0]
+              el.autoplay = true
+              el.controls = true
+              document.getElementById('remoteVideos').appendChild(el)
 
-        ws.send(JSON.stringify({event: 'candidate', data: JSON.stringify(e.candidate)}))
-      }
+              event.track.onmute = function(event) {
+                el.play()
+              }
 
-      ws.onclose = function(evt) {
-        window.alert("Websocket has closed")
-      }
-
-      ws.onmessage = function(evt) {
-        let msg = JSON.parse(evt.data)
-        if (!msg) {
-          return console.log('failed to parse msg')
-        }
-
-        switch (msg.event) {
-          case 'offer':
-            let offer = JSON.parse(msg.data)
-            if (!offer) {
-              return console.log('failed to parse answer')
+              event.streams[0].onremovetrack = ({_track}) => {
+                if (el.parentNode) {
+                  el.parentNode.removeChild(el)
+                }
+              }
             }
-            pc.setRemoteDescription(offer)
-            pc.createAnswer().then(answer => {
-              pc.setLocalDescription(answer)
-              ws.send(JSON.stringify({event: 'answer', data: JSON.stringify(answer)}))
+
+            stream.getTracks().forEach(t => {
+              if (t.kind === 'audio') {
+                pc.addTransceiver(t, {
+                  direction: 'sendrecv',
+                  streams: [stream]
+                })
+              } else {
+                pc.addTransceiver(t, {
+                  direction: 'sendrecv',
+                  streams: [stream],
+                  sendEncodings: [
+                    {rid: 'high', maxBitrate: 900000, scalabilityMode: 'L1T3'},
+                    {rid: 'medium', scaleResolutionDownBy: 2, maxBitrate: 300000, scalabilityMode: 'L1T3'},
+                    {rid: 'low', scaleResolutionDownBy: 4, maxBitrate: 100000, scalabilityMode: 'L1T3'},
+                  ]
+                });
+              }
             })
-            return
 
-          case 'candidate':
-            let candidate = JSON.parse(msg.data)
-            if (!candidate) {
-              return console.log('failed to parse candidate')
+            let ws = new WebSocket("{{.}}")
+
+            ws.onopen = function () {
+              pc.createOffer().then((offer) => {
+                pc.setLocalDescription(offer)
+                console.log("send offer")
+                ws.send(JSON.stringify({event: 'offer', data: JSON.stringify(offer)}))
+              });
+
+              pc.onicecandidate = e => {
+                if (!e.candidate) {
+                  return
+                }
+                console.log("send candidate")
+
+                ws.send(JSON.stringify({event: 'candidate', data: JSON.stringify(e.candidate)}))
+              }
             }
 
-            pc.addIceCandidate(candidate)
-        }
-      }
+            ws.onmessage = function(evt) {
+              let msg = JSON.parse(evt.data)
+              if (!msg) {
+                return console.log('failed to parse msg')
+              }
 
-      ws.onerror = function(evt) {
-        console.log("ERROR: " + evt.data)
-      }
-    }).catch(window.alert)
-  </script>
+              console.log(msg.event)
+
+              switch (msg.event) {
+                case 'offer':
+                  let offer = JSON.parse(msg.data)
+                  if (!offer) {
+                    return console.log('failed to parse offer')
+                  }
+                  pc.setRemoteDescription(offer)
+                  pc.createAnswer().then(answer => {
+                    pc.setLocalDescription(answer)
+                    ws.send(JSON.stringify({event: 'answer', data: JSON.stringify(answer)}))
+                  })
+                  return
+
+                case 'answer':
+                  let answer = JSON.parse(msg.data)
+                  if (!answer) {
+                    return
+                  }
+                  pc.setRemoteDescription(answer)
+                  return
+
+                case 'candidate':
+                  let candidate = JSON.parse(msg.data)
+                  if (!candidate) {
+                    return console.log('failed to parse candidate')
+                  }
+
+                  pc.addIceCandidate(candidate)
+              }
+            }
+
+            ws.onerror = function(evt) {
+              console.log("ERROR: " + evt.data)
+            }
+
+            ws.onclose = function(evt) {
+              window.alert("Websocket has closed")
+            }
+          }).catch(window.alert)
+</script>
 </html>

@@ -3,7 +3,7 @@ package service
 import (
 	"crypto/sha256"
 	"fmt"
-	"github.com/pion/webrtc/v3"
+	"github.com/pion/webrtc/v4"
 	"log/slog"
 	wrtc "rooms/internal/webrtc"
 	"sync"
@@ -31,41 +31,25 @@ func (s *RoomService) CreateOrGetRoom(uuid string) (*wrtc.Room, error) {
 		return room, nil
 	}
 
-	room := wrtc.NewRoom()
+	room := wrtc.NewRoom(uuid)
 
 	s.Rooms[uuid] = room
 
 	return room, nil
 }
 
-func (s *RoomService) InitPeerConnection(room *wrtc.Room) (*wrtc.PeerConnectionState, error) {
+func (s *RoomService) InitPeerConnection(room *wrtc.Room) (*wrtc.Peer, error) {
 	const op = "service.RoomService.InitPeerConnection"
 
-	newPeer, err := wrtc.NewPeerConnectionState()
+	newPeer, err := wrtc.NewPeer()
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", op, err)
 	}
+
 	room.AddPeerConnection(newPeer)
 
-	// Accept one audio and one video track incoming
-	for _, typ := range []webrtc.RTPCodecType{webrtc.RTPCodecTypeVideo, webrtc.RTPCodecTypeAudio} {
-		if _, err := newPeer.PeerConnection.AddTransceiverFromKind(typ, webrtc.RTPTransceiverInit{
-			Direction: webrtc.RTPTransceiverDirectionRecvonly,
-		}); err != nil {
-			return nil, fmt.Errorf("%s: %w", op, err)
-		}
-	}
-
-	// Trickle ICE. Emit server candidate to client
-	newPeer.PeerConnection.OnICECandidate(func(i *webrtc.ICECandidate) {
-		if err := newPeer.SendICECandidate(i); err != nil {
-			s.logger.Error(fmt.Errorf("%s: %w", op, err).Error())
-			return
-		}
-	})
-
 	// If PeerConnection is closed remove it from global list
-	newPeer.PeerConnection.OnConnectionStateChange(func(pp webrtc.PeerConnectionState) {
+	newPeer.OnConnectionStateChange(func(pp webrtc.PeerConnectionState) {
 		switch pp {
 		case webrtc.PeerConnectionStateFailed:
 			if err := newPeer.Close(); err != nil {
@@ -73,37 +57,46 @@ func (s *RoomService) InitPeerConnection(room *wrtc.Room) (*wrtc.PeerConnectionS
 			}
 		case webrtc.PeerConnectionStateClosed:
 			room.SignalPeerConnections()
+		default:
+			return
 		}
 	})
 
-	newPeer.PeerConnection.OnTrack(func(t *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
-		// Create a track to fan out our incoming video to all peers
-		trackLocal := room.AddTrack(t)
-		if trackLocal == nil {
+	newPeer.OnICECandidate(func(i *webrtc.ICECandidate) {
+		if err := newPeer.SendICECandidate(i); err != nil {
+			s.logger.Error(fmt.Errorf("%s: %w", op, err).Error())
 			return
 		}
+	})
+
+	newPeer.OnTrack(func(t *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+		output, err := room.AddTrack(t)
+		if err != nil {
+			s.logger.Error(err.Error())
+			return
+		}
+		s.logger.Debug(fmt.Sprintf("Room: %s track with ID %s was added into store", room.ID, output.ID()))
+
 		defer func() {
-			room.RemoveTrack(trackLocal)
+			room.RemoveTrack(output)
+			s.logger.Debug(fmt.Sprintf("track: %s was removed from store", output.ID()))
 			room.SignalPeerConnections()
 		}()
 
-		buf := make([]byte, 1500)
+		buffer := make([]byte, 1500)
 		for {
-			i, _, err := t.Read(buf)
+			i, _, err := t.Read(buffer)
 			if err != nil {
 				s.logger.Error(fmt.Errorf("%s: %w", op, err).Error())
 				return
 			}
-
-			_, err = trackLocal.Write(buf[:i])
+			_, err = output.Write(buffer[:i])
 			if err != nil {
 				s.logger.Error(fmt.Errorf("%s: %w", op, err).Error())
 				return
 			}
 		}
 	})
-
-	room.SignalPeerConnections()
 
 	return newPeer, nil
 }
@@ -112,10 +105,8 @@ func (s *RoomService) CloseAllConnections() {
 	const op = "service.RoomService.CloseAllConnections"
 
 	for _, room := range s.Rooms {
-		for _, peer := range room.Connections {
-			if err := peer.Close(); err != nil {
-				s.logger.Error(fmt.Errorf("%s: %w", op, err).Error())
-			}
+		if err := room.Close(); err != nil {
+			s.logger.Error(fmt.Errorf("%s: %w", op, err).Error())
 		}
 	}
 }

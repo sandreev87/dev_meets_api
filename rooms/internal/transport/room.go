@@ -15,11 +15,12 @@ import (
 
 type RoomServiceInt interface {
 	CreateOrGetRoom(uuid string) (*wrtc.Room, error)
-	InitPeerConnection(room *wrtc.Room) (*wrtc.PeerConnectionState, error)
+	InitPeerConnection(room *wrtc.Room) (*wrtc.Peer, error)
 }
 
 type PeerInt interface {
 	HandleEvent(event string, data string) error
+	ListenSendEvents(ctx context.Context, callback func(string, string))
 	Close() error
 }
 
@@ -54,29 +55,29 @@ func (h *RoomHandler) SignalHandler(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error(err.Error())
 		return
 	}
-	ctx, close := context.WithCancel(r.Context())
+	ctx := r.Context()
 	roomID := chi.URLParam(r, "roomID")
+
 	room, err := h.service.CreateOrGetRoom(roomID)
 	if err != nil {
 		h.logger.Error(err.Error())
-		close()
 		return
 	}
-	peer, err := h.service.InitPeerConnection(room)
+
+	var peer PeerInt
+	peer, err = h.service.InitPeerConnection(room)
 	if err != nil {
 		h.logger.Error(err.Error())
-		close()
 		return
 	}
 	defer func() {
 		if err := peer.Close(); err != nil {
 			h.logger.Error(err.Error())
 		}
-		close()
 	}()
 
 	loc := sync.Mutex{}
-	peer.ListenEvents(ctx, func(event string, data string) {
+	peer.ListenSendEvents(ctx, func(event string, data string) {
 		msg := &websocketMessage{
 			Event: event,
 			Data:  data,

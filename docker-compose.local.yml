@@ -63,6 +63,7 @@ services:
     container_name: rooms
     image: rooms
     environment:
+      - PION_LOG_DEBUG=warn
       - HTTP_PORT=8083
       - ENV
     networks:
