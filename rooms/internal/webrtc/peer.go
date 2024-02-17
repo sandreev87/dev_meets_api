@@ -5,19 +5,22 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	guuid "github.com/google/uuid"
 	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v4"
 	"strings"
 	"sync"
 )
 
-const DefaultQuality = "high"
+const DefaultQuality = "low"
 
 type Peer struct {
-	peerConnection    *webrtc.PeerConnection
-	internalEventChan chan InternalEvent
-	CurrentQuality    string
-	lock              sync.Mutex
+	ID                     string
+	peerConnection         *webrtc.PeerConnection
+	internalEventChan      chan InternalEvent
+	CurrentQuality         string
+	onChangeQualityHandler func()
+	SyncMx                 sync.RWMutex
 }
 
 type InternalEvent struct {
@@ -34,6 +37,7 @@ func NewPeer() (*Peer, error) {
 	}
 
 	return &Peer{
+		ID:                guuid.New().String(),
 		peerConnection:    peerConnection,
 		CurrentQuality:    DefaultQuality,
 		internalEventChan: make(chan InternalEvent, 20),
@@ -52,26 +56,26 @@ func (peer *Peer) OnConnectionStateChange(f func(webrtc.PeerConnectionState)) {
 	peer.peerConnection.OnConnectionStateChange(f)
 }
 
-func (peer *Peer) OutputTrackIDs() []string {
-	var ids []string
-	for _, sender := range peer.peerConnection.GetSenders() {
+func (peer *Peer) OutputTrackIDs() (ids []string) {
+	senders := peer.peerConnection.GetSenders()
+	for index := range senders {
+		sender := senders[index]
 		if sender.Track() == nil {
 			continue
 		}
 		ids = append(ids, sender.Track().ID())
 	}
-	return ids
+	return
 }
 
-func (peer *Peer) InputTrackIDs() []string {
-	var ids []string
-	for _, receiver := range peer.peerConnection.GetReceivers() {
-		for _, track := range receiver.Tracks() {
-			trackID := track.RID() + "_" + track.ID()
-			ids = append(ids, trackID)
+func (peer *Peer) InputTrackIDs() (ids []string) {
+	receivers := peer.peerConnection.GetReceivers()
+	for index, _ := range receivers {
+		for _, track := range receivers[index].Tracks() {
+			ids = append(ids, track.RID()+"_"+track.ID())
 		}
 	}
-	return ids
+	return
 }
 
 func (peer *Peer) AddTrack(track *webrtc.TrackLocalStaticRTP) error {
@@ -87,7 +91,7 @@ func (peer *Peer) AddTrack(track *webrtc.TrackLocalStaticRTP) error {
 
 func (peer *Peer) RemoveTrack(id string) error {
 	for _, sender := range peer.peerConnection.GetSenders() {
-		if sender.Track() != nil && sender.Track().ID() == id {
+		if sender.Track() == nil || sender.Track().ID() != id {
 			continue
 		}
 
@@ -219,6 +223,12 @@ func (peer *Peer) SendICECandidate(i *webrtc.ICECandidate) error {
 	return nil
 }
 
+func (peer *Peer) ChangeQuality(quality string) {
+	peer.SyncMx.Lock()
+	peer.CurrentQuality = quality
+	peer.SyncMx.Unlock()
+}
+
 func (peer *Peer) HandleEvent(event string, data string) error {
 	switch event {
 	case "send_offer":
@@ -239,6 +249,8 @@ func (peer *Peer) HandleEvent(event string, data string) error {
 		if err := peer.AcceptAnswer(data); err != nil {
 			return err
 		}
+	case "change_quality":
+		peer.ChangeQuality(data)
 	}
 	return nil
 }
@@ -248,7 +260,8 @@ func (peer *Peer) ListenSendEvents(ctx context.Context, callback func(string, st
 		for {
 			select {
 			case <-ctx.Done():
-				break
+				close(peer.internalEventChan)
+				return
 			case event := <-peer.internalEventChan:
 				callback(event.Event, event.Data)
 			}

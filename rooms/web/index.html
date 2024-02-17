@@ -71,9 +71,9 @@
                   direction: 'sendrecv',
                   streams: [stream],
                   sendEncodings: [
-                    {rid: 'high', maxBitrate: 900000, scalabilityMode: 'L1T3'},
-                    {rid: 'medium', scaleResolutionDownBy: 2, maxBitrate: 300000, scalabilityMode: 'L1T3'},
-                    {rid: 'low', scaleResolutionDownBy: 4, maxBitrate: 100000, scalabilityMode: 'L1T3'},
+                    //{rid: 'high', maxBitrate: 900000},
+                    {rid: 'medium', scaleResolutionDownBy: 2, maxBitrate: 300000},
+                    {rid: 'low', scaleResolutionDownBy: 4, maxBitrate: 100000},
                   ]
                 });
               }

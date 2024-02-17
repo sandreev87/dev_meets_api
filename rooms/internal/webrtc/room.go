@@ -10,7 +10,7 @@ import (
 type Room struct {
 	ID           string
 	listLock     sync.RWMutex
-	peers        []*Peer
+	peers        map[string]*Peer
 	outputTracks map[string]*webrtc.TrackLocalStaticRTP
 }
 
@@ -18,7 +18,7 @@ func NewRoom(uuid string) *Room {
 	return &Room{
 		ID:           uuid,
 		listLock:     sync.RWMutex{},
-		peers:        []*Peer{},
+		peers:        map[string]*Peer{},
 		outputTracks: map[string]*webrtc.TrackLocalStaticRTP{},
 	}
 }
@@ -27,7 +27,6 @@ func (r *Room) AddTrack(t *webrtc.TrackRemote) (*webrtc.TrackLocalStaticRTP, err
 	r.listLock.Lock()
 	defer func() {
 		r.listLock.Unlock()
-		r.SignalPeerConnections()
 	}()
 
 	trackID, err := r.makeTrackID(t)
@@ -44,6 +43,15 @@ func (r *Room) AddTrack(t *webrtc.TrackRemote) (*webrtc.TrackLocalStaticRTP, err
 	return trackLocal, nil
 }
 
+func (r *Room) RemoveTrack(t *webrtc.TrackLocalStaticRTP) {
+	r.listLock.Lock()
+	defer func() {
+		r.listLock.Unlock()
+	}()
+
+	delete(r.outputTracks, t.ID())
+}
+
 func (r *Room) makeTrackID(t *webrtc.TrackRemote) (string, error) {
 	if t.Kind().String() == "audio" {
 		return "audio" + "_" + t.ID(), nil
@@ -55,28 +63,17 @@ func (r *Room) makeTrackID(t *webrtc.TrackRemote) (string, error) {
 	}
 }
 
-func (r *Room) RemoveTrack(t *webrtc.TrackLocalStaticRTP) {
+func (r *Room) SignalAllPeers() {
 	r.listLock.Lock()
 	defer func() {
 		r.listLock.Unlock()
-		r.SignalPeerConnections()
-	}()
-
-	delete(r.outputTracks, t.ID())
-}
-
-func (r *Room) SignalPeerConnections() {
-	r.listLock.Lock()
-	defer func() {
-		r.listLock.Unlock()
-		r.DispatchKeyFrame()
 	}()
 
 	for syncAttempt := 0; ; syncAttempt++ {
 		if syncAttempt == 25 {
 			go func() {
 				time.Sleep(time.Second * 3)
-				r.SignalPeerConnections()
+				r.SignalAllPeers()
 			}()
 			return
 		}
@@ -87,55 +84,69 @@ func (r *Room) SignalPeerConnections() {
 	}
 }
 
-func (r *Room) attemptSync() bool {
-	for i := range r.peers {
-		if r.peers[i].IsClosed() {
-			r.peers = append(r.peers[:i], r.peers[i+1:]...)
+func (r *Room) attemptSyncPeer(peer *Peer) bool {
+	peerChanged := false
+	existingSenders := map[string]struct{}{}
+
+	// map of sender we already are sending, so we don't double send
+	for _, id := range peer.OutputTrackIDs() {
+		existingSenders[id] = struct{}{}
+
+		if _, ok := r.outputTracks[id]; !ok {
+			if err := peer.RemoveTrack(id); err != nil {
+				return false
+			}
+			peerChanged = true
+		}
+	}
+
+	// Don't receive videos we are sending, make sure we don't have loopback
+	for _, id := range peer.InputTrackIDs() {
+		existingSenders[id] = struct{}{}
+	}
+
+	for trackID := range r.outputTracks {
+		if !peer.CanAddTrack(trackID) {
+			continue
+		}
+		if _, ok := existingSenders[trackID]; !ok {
+			if err := peer.AddTrack(r.outputTracks[trackID]); err != nil {
+				return false
+			}
+			peerChanged = true
+		}
+	}
+
+	if peerChanged {
+		if err := peer.SendOffer(); err != nil {
 			return false
-		}
-
-		peerChanged := false
-		existingSenders := map[string]struct{}{}
-
-		// map of sender we already are sending, so we don't double send
-		for _, id := range r.peers[i].OutputTrackIDs() {
-			existingSenders[id] = struct{}{}
-
-			if _, ok := r.outputTracks[id]; !ok {
-				if err := r.peers[i].RemoveTrack(id); err != nil {
-					return false
-				}
-				peerChanged = true
-			}
-		}
-		// Don't receive videos we are sending, make sure we don't have loopback
-		for _, id := range r.peers[i].InputTrackIDs() {
-			existingSenders[id] = struct{}{}
-		}
-
-		for trackID := range r.outputTracks {
-			if !r.peers[i].CanAddTrack(trackID) {
-				continue
-			}
-			if _, ok := existingSenders[trackID]; !ok {
-				if err := r.peers[i].AddTrack(r.outputTracks[trackID]); err != nil {
-					return false
-				}
-				peerChanged = true
-			}
-		}
-
-		if peerChanged {
-			r.peers[i].SendOffer()
 		}
 	}
 
 	return true
 }
 
+func (r *Room) attemptSync() bool {
+	for _, peer := range r.peers {
+		peer.SyncMx.RLock()
+
+		if peer.IsClosed() {
+			delete(r.peers, peer.ID)
+			return false
+		}
+
+		if !r.attemptSyncPeer(peer) {
+			peer.SyncMx.RUnlock()
+			return false
+		}
+		peer.SyncMx.RUnlock()
+	}
+	return true
+}
+
 func (r *Room) AddPeerConnection(newPeer *Peer) {
 	r.listLock.Lock()
-	r.peers = append(r.peers, newPeer)
+	r.peers[newPeer.ID] = newPeer
 	r.listLock.Unlock()
 }
 
@@ -149,8 +160,8 @@ func (r *Room) Close() error {
 }
 
 func (r *Room) DispatchKeyFrame() {
-	r.listLock.RLock()
-	defer r.listLock.RUnlock()
+	r.listLock.Lock()
+	defer r.listLock.Unlock()
 
 	for _, peer := range r.peers {
 		peer.DispatchKeyFrame()

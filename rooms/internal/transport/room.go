@@ -55,12 +55,13 @@ func (h *RoomHandler) SignalHandler(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error(err.Error())
 		return
 	}
-	ctx := r.Context()
+	ctx, cancel := context.WithCancel(r.Context())
 	roomID := chi.URLParam(r, "roomID")
 
 	room, err := h.service.CreateOrGetRoom(roomID)
 	if err != nil {
 		h.logger.Error(err.Error())
+		cancel()
 		return
 	}
 
@@ -68,12 +69,14 @@ func (h *RoomHandler) SignalHandler(w http.ResponseWriter, r *http.Request) {
 	peer, err = h.service.InitPeerConnection(room)
 	if err != nil {
 		h.logger.Error(err.Error())
+		cancel()
 		return
 	}
 	defer func() {
 		if err := peer.Close(); err != nil {
 			h.logger.Error(err.Error())
 		}
+		cancel()
 	}()
 
 	loc := sync.Mutex{}

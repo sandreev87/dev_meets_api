@@ -15,7 +15,8 @@ import (
 
 type RoomServiceInt interface {
 	CloseAllConnections()
-	DispatchKeyFrames()
+	DispatchKeyFrames(ctx context.Context)
+	Sync(ctx context.Context)
 }
 
 type App struct {
@@ -52,8 +53,10 @@ func (a *App) Run() {
 
 	done := make(chan os.Signal, 1)
 	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+	ctx, cancel := context.WithCancel(context.Background())
 
-	go a.roomServ.DispatchKeyFrames()
+	go a.roomServ.Sync(ctx)
+	go a.roomServ.DispatchKeyFrames(ctx)
 	go func() {
 		if err := a.HTTPServer.ListenAndServe(); err != nil {
 			a.logger.Error("failed to start server", err)
@@ -63,6 +66,7 @@ func (a *App) Run() {
 	a.logger.Info("server started")
 
 	<-done
+	cancel()
 
 	a.logger.Info("stopping server")
 	a.Stop()

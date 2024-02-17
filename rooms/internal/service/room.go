@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"github.com/pion/webrtc/v4"
@@ -11,29 +12,32 @@ import (
 )
 
 type RoomService struct {
-	RoomsLock sync.RWMutex
-	Rooms     map[string]*wrtc.Room
+	roomsLock sync.RWMutex
+	rooms     map[string]*wrtc.Room
 	logger    *slog.Logger
 }
 
 func NewRoomService(logger *slog.Logger) *RoomService {
-	return &RoomService{Rooms: make(map[string]*wrtc.Room), logger: logger}
+	return &RoomService{
+		rooms:  make(map[string]*wrtc.Room),
+		logger: logger,
+	}
 }
 
 func (s *RoomService) CreateOrGetRoom(uuid string) (*wrtc.Room, error) {
-	s.RoomsLock.Lock()
-	defer s.RoomsLock.Unlock()
+	s.roomsLock.Lock()
+	defer s.roomsLock.Unlock()
 
 	hash := sha256.New()
 	hash.Write([]byte(uuid))
 
-	if room := s.Rooms[uuid]; room != nil {
+	if room := s.rooms[uuid]; room != nil {
 		return room, nil
 	}
 
 	room := wrtc.NewRoom(uuid)
 
-	s.Rooms[uuid] = room
+	s.rooms[uuid] = room
 
 	return room, nil
 }
@@ -53,10 +57,10 @@ func (s *RoomService) InitPeerConnection(room *wrtc.Room) (*wrtc.Peer, error) {
 		switch pp {
 		case webrtc.PeerConnectionStateFailed:
 			if err := newPeer.Close(); err != nil {
-				s.logger.Error(fmt.Errorf("%s: %w", op, err).Error())
+				s.logger.Error(fmt.Errorf("OnConnectionStateChange callback %s: %w", op, err).Error())
 			}
 		case webrtc.PeerConnectionStateClosed:
-			room.SignalPeerConnections()
+			s.logger.Debug(fmt.Sprintf("connection: %s was closed", newPeer.ID))
 		default:
 			return
 		}
@@ -64,7 +68,7 @@ func (s *RoomService) InitPeerConnection(room *wrtc.Room) (*wrtc.Peer, error) {
 
 	newPeer.OnICECandidate(func(i *webrtc.ICECandidate) {
 		if err := newPeer.SendICECandidate(i); err != nil {
-			s.logger.Error(fmt.Errorf("%s: %w", op, err).Error())
+			s.logger.Error(fmt.Errorf("OnICECandidate callback %s: %w", op, err).Error())
 			return
 		}
 	})
@@ -72,15 +76,14 @@ func (s *RoomService) InitPeerConnection(room *wrtc.Room) (*wrtc.Peer, error) {
 	newPeer.OnTrack(func(t *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 		output, err := room.AddTrack(t)
 		if err != nil {
-			s.logger.Error(err.Error())
+			s.logger.Error(fmt.Errorf("%s: %w", op, err).Error())
 			return
 		}
-		s.logger.Debug(fmt.Sprintf("Room: %s track with ID %s was added into store", room.ID, output.ID()))
+		s.logger.Debug(fmt.Sprintf("%s: room: %s track with ID %s was added into store", op, room.ID, output.ID()))
 
 		defer func() {
 			room.RemoveTrack(output)
-			s.logger.Debug(fmt.Sprintf("track: %s was removed from store", output.ID()))
-			room.SignalPeerConnections()
+			s.logger.Debug(fmt.Sprintf("%s: track: %s was removed from store", op, output.ID()))
 		}()
 
 		buffer := make([]byte, 1500)
@@ -104,17 +107,41 @@ func (s *RoomService) InitPeerConnection(room *wrtc.Room) (*wrtc.Peer, error) {
 func (s *RoomService) CloseAllConnections() {
 	const op = "service.RoomService.CloseAllConnections"
 
-	for _, room := range s.Rooms {
+	for _, room := range s.rooms {
 		if err := room.Close(); err != nil {
 			s.logger.Error(fmt.Errorf("%s: %w", op, err).Error())
 		}
 	}
 }
 
-func (s *RoomService) DispatchKeyFrames() {
-	for range time.NewTicker(time.Second * 3).C {
-		for _, room := range s.Rooms {
-			room.DispatchKeyFrame()
+func (s *RoomService) Sync(ctx context.Context) {
+	const op = "service.RoomService.Sync"
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.NewTicker(time.Second).C:
+			for _, room := range s.rooms {
+				go func(r *wrtc.Room) {
+					r.SignalAllPeers()
+				}(room)
+			}
+		}
+	}
+}
+
+func (s *RoomService) DispatchKeyFrames(ctx context.Context) {
+	const op = "service.RoomService.DispatchKeyFrames"
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.NewTicker(time.Second * 3).C:
+			for _, room := range s.rooms {
+				room.DispatchKeyFrame()
+			}
 		}
 	}
 }
