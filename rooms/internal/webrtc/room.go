@@ -2,10 +2,12 @@ package webrtc
 
 import (
 	"errors"
+	"fmt"
 	"github.com/pion/webrtc/v4"
 	"sync"
-	"time"
 )
+
+const MaxNumberAttempts = 25
 
 type Room struct {
 	ID           string
@@ -53,13 +55,16 @@ func (r *Room) RemoveTrack(t *webrtc.TrackLocalStaticRTP) {
 }
 
 func (r *Room) makeTrackID(t *webrtc.TrackRemote) (string, error) {
-	if t.Kind().String() == "audio" {
-		return "audio" + "_" + t.ID(), nil
-	} else {
+	switch t.Kind() {
+	case webrtc.RTPCodecTypeAudio:
+		return fmt.Sprintf("audio_%s", t.ID()), nil
+	case webrtc.RTPCodecTypeVideo:
 		if t.RID() == "" {
 			return "", errors.New("track's RID is blank")
 		}
-		return t.RID() + "_" + t.ID(), nil
+		return fmt.Sprintf("video_%s_%s", t.RID(), t.ID()), nil
+	default:
+		return "", errors.New("forbidden codec type")
 	}
 }
 
@@ -69,77 +74,18 @@ func (r *Room) SignalAllPeers() {
 		r.listLock.Unlock()
 	}()
 
-	for syncAttempt := 0; ; syncAttempt++ {
-		if syncAttempt == 25 {
-			go func() {
-				time.Sleep(time.Second * 3)
-				r.SignalAllPeers()
-			}()
-			return
-		}
-
+	for syncAttempt := 0; syncAttempt <= MaxNumberAttempts; syncAttempt++ {
 		if r.attemptSync() {
 			break
 		}
 	}
 }
 
-func (r *Room) attemptSyncPeer(peer *Peer) bool {
-	peerChanged := false
-	existingSenders := map[string]struct{}{}
-
-	// map of sender we already are sending, so we don't double send
-	for _, id := range peer.OutputTrackIDs() {
-		existingSenders[id] = struct{}{}
-
-		if _, ok := r.outputTracks[id]; !ok {
-			if err := peer.RemoveTrack(id); err != nil {
-				return false
-			}
-			peerChanged = true
-		}
-	}
-
-	// Don't receive videos we are sending, make sure we don't have loopback
-	for _, id := range peer.InputTrackIDs() {
-		existingSenders[id] = struct{}{}
-	}
-
-	for trackID := range r.outputTracks {
-		if !peer.CanAddTrack(trackID) {
-			continue
-		}
-		if _, ok := existingSenders[trackID]; !ok {
-			if err := peer.AddTrack(r.outputTracks[trackID]); err != nil {
-				return false
-			}
-			peerChanged = true
-		}
-	}
-
-	if peerChanged {
-		if err := peer.SendOffer(); err != nil {
-			return false
-		}
-	}
-
-	return true
-}
-
 func (r *Room) attemptSync() bool {
 	for _, peer := range r.peers {
-		peer.SyncMx.RLock()
-
-		if peer.IsClosed() {
-			delete(r.peers, peer.ID)
+		if !peer.Sync(r.outputTracks) {
 			return false
 		}
-
-		if !r.attemptSyncPeer(peer) {
-			peer.SyncMx.RUnlock()
-			return false
-		}
-		peer.SyncMx.RUnlock()
 	}
 	return true
 }
@@ -147,6 +93,12 @@ func (r *Room) attemptSync() bool {
 func (r *Room) AddPeerConnection(newPeer *Peer) {
 	r.listLock.Lock()
 	r.peers[newPeer.ID] = newPeer
+	r.listLock.Unlock()
+}
+
+func (r *Room) RemovePeerConnection(newPeer *Peer) {
+	r.listLock.Lock()
+	delete(r.peers, newPeer.ID)
 	r.listLock.Unlock()
 }
 

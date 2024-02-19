@@ -2,7 +2,6 @@ package webrtc
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	guuid "github.com/google/uuid"
@@ -12,20 +11,18 @@ import (
 	"sync"
 )
 
-const DefaultQuality = "low"
+const (
+	DefaultQuality     = "low"
+	AudioPrefix        = "audio"
+	ChangeQualityEvent = "change_quality"
+)
 
 type Peer struct {
 	ID                     string
 	peerConnection         *webrtc.PeerConnection
-	internalEventChan      chan InternalEvent
+	NegotiationCoordinator *NegotiationCoordinator
 	CurrentQuality         string
-	onChangeQualityHandler func()
-	SyncMx                 sync.RWMutex
-}
-
-type InternalEvent struct {
-	Event string
-	Data  string
+	syncMx                 sync.RWMutex
 }
 
 func NewPeer() (*Peer, error) {
@@ -37,10 +34,10 @@ func NewPeer() (*Peer, error) {
 	}
 
 	return &Peer{
-		ID:                guuid.New().String(),
-		peerConnection:    peerConnection,
-		CurrentQuality:    DefaultQuality,
-		internalEventChan: make(chan InternalEvent, 20),
+		ID:                     guuid.New().String(),
+		peerConnection:         peerConnection,
+		NegotiationCoordinator: NewNegotiationCoordinator(peerConnection),
+		CurrentQuality:         DefaultQuality,
 	}, nil
 }
 
@@ -104,12 +101,8 @@ func (peer *Peer) RemoveTrack(id string) error {
 	return nil
 }
 
-func (peer *Peer) IsClosed() bool {
-	return peer.peerConnection.ConnectionState() == webrtc.PeerConnectionStateClosed
-}
-
 func (peer *Peer) CanAddTrack(id string) bool {
-	return strings.HasPrefix(id, peer.CurrentQuality) || strings.HasPrefix(id, "audio")
+	return strings.HasPrefix(id, peer.CurrentQuality) || strings.HasPrefix(id, AudioPrefix)
 }
 
 func (peer *Peer) Close() error {
@@ -135,136 +128,69 @@ func (peer *Peer) DispatchKeyFrame() {
 	}
 }
 
-func (peer *Peer) AcceptAnswer(data string) error {
-	answer := webrtc.SessionDescription{}
-	if err := json.Unmarshal([]byte(data), &answer); err != nil {
-		return err
-	}
-
-	if err := peer.peerConnection.SetRemoteDescription(answer); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (peer *Peer) SendAnswer() error {
-	answer, err := peer.peerConnection.CreateAnswer(nil)
-	if err != nil {
-		panic(err)
-	}
-
-	// Sets the LocalDescription, and starts our UDP listeners
-	if err := peer.peerConnection.SetLocalDescription(answer); err != nil {
-		return err
-	}
-
-	answerString, err := json.Marshal(answer)
-	peer.HandleEvent("send_answer", string(answerString))
-	return nil
-}
-
-func (peer *Peer) SendOffer() error {
-	offer, err := peer.peerConnection.CreateOffer(nil)
-	if err != nil {
-		return err
-	}
-
-	if err = peer.peerConnection.SetLocalDescription(offer); err != nil {
-		return err
-	}
-
-	offerString, err := json.Marshal(offer)
-	if err != nil {
-		return err
-	}
-	peer.HandleEvent("send_offer", string(offerString))
-	return nil
-}
-
-func (peer *Peer) AcceptOffer(data string) error {
-	offer := webrtc.SessionDescription{}
-
-	if err := json.Unmarshal([]byte(data), &offer); err != nil {
-		return err
-	}
-
-	if err := peer.peerConnection.SetRemoteDescription(offer); err != nil {
-		return err
-	}
-
-	if err := peer.SendAnswer(); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (peer *Peer) AcceptICECandidate(data string) error {
-	candidate := webrtc.ICECandidateInit{}
-	if err := json.Unmarshal([]byte(data), &candidate); err != nil {
-		return err
-	}
-
-	if err := peer.peerConnection.AddICECandidate(candidate); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (peer *Peer) SendICECandidate(i *webrtc.ICECandidate) error {
-	if i == nil {
-		return nil
-	}
-
-	candidateString, err := json.Marshal(i.ToJSON())
-	if err != nil {
-		return err
-	}
-	peer.HandleEvent("send_candidate", string(candidateString))
-	return nil
-}
-
 func (peer *Peer) ChangeQuality(quality string) {
-	peer.SyncMx.Lock()
+	peer.syncMx.Lock()
 	peer.CurrentQuality = quality
-	peer.SyncMx.Unlock()
+	peer.syncMx.Unlock()
 }
 
 func (peer *Peer) HandleEvent(event string, data string) error {
 	switch event {
-	case "send_offer":
-		peer.internalEventChan <- InternalEvent{Event: "offer", Data: data}
-	case "send_answer":
-		peer.internalEventChan <- InternalEvent{Event: "answer", Data: data}
-	case "send_candidate":
-		peer.internalEventChan <- InternalEvent{Event: "candidate", Data: data}
-	case "offer":
-		if err := peer.AcceptOffer(data); err != nil {
-			return err
-		}
-	case "candidate":
-		if err := peer.AcceptICECandidate(data); err != nil {
-			return err
-		}
-	case "answer":
-		if err := peer.AcceptAnswer(data); err != nil {
-			return err
-		}
-	case "change_quality":
+	case ChangeQualityEvent:
 		peer.ChangeQuality(data)
+	default:
+		if err := peer.NegotiationCoordinator.HandleEvent(event, data); err != nil {
+			return err
+		}
+		return nil
 	}
 	return nil
 }
 
 func (peer *Peer) ListenSendEvents(ctx context.Context, callback func(string, string)) {
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				close(peer.internalEventChan)
-				return
-			case event := <-peer.internalEventChan:
-				callback(event.Event, event.Data)
+	peer.NegotiationCoordinator.ListenSendEvents(ctx, callback)
+}
+
+func (peer *Peer) Sync(outputTracks map[string]*webrtc.TrackLocalStaticRTP) bool {
+	peer.syncMx.RLock()
+	peerChanged := false
+	existingSenders := map[string]struct{}{}
+
+	// map of sender we already are sending, so we don't double send
+	for _, id := range peer.OutputTrackIDs() {
+		existingSenders[id] = struct{}{}
+
+		if _, ok := outputTracks[id]; !ok {
+			if err := peer.RemoveTrack(id); err != nil {
+				return false
 			}
+			peerChanged = true
 		}
-	}()
+	}
+
+	// Don't receive videos we are sending, make sure we don't have loopback
+	for _, id := range peer.InputTrackIDs() {
+		existingSenders[id] = struct{}{}
+	}
+
+	for trackID := range outputTracks {
+		if !peer.CanAddTrack(trackID) {
+			continue
+		}
+		if _, ok := existingSenders[trackID]; !ok {
+			if err := peer.AddTrack(outputTracks[trackID]); err != nil {
+				return false
+			}
+			peerChanged = true
+		}
+	}
+
+	if peerChanged {
+		if err := peer.NegotiationCoordinator.SendOffer(); err != nil {
+			return false
+		}
+	}
+
+	peer.syncMx.RUnlock()
+	return true
 }

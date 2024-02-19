@@ -56,10 +56,12 @@ func (s *RoomService) InitPeerConnection(room *wrtc.Room) (*wrtc.Peer, error) {
 	newPeer.OnConnectionStateChange(func(pp webrtc.PeerConnectionState) {
 		switch pp {
 		case webrtc.PeerConnectionStateFailed:
+			room.RemovePeerConnection(newPeer)
 			if err := newPeer.Close(); err != nil {
 				s.logger.Error(fmt.Errorf("OnConnectionStateChange callback %s: %w", op, err).Error())
 			}
 		case webrtc.PeerConnectionStateClosed:
+			room.RemovePeerConnection(newPeer)
 			s.logger.Debug(fmt.Sprintf("connection: %s was closed", newPeer.ID))
 		default:
 			return
@@ -67,7 +69,7 @@ func (s *RoomService) InitPeerConnection(room *wrtc.Room) (*wrtc.Peer, error) {
 	})
 
 	newPeer.OnICECandidate(func(i *webrtc.ICECandidate) {
-		if err := newPeer.SendICECandidate(i); err != nil {
+		if err := newPeer.NegotiationCoordinator.SendICECandidate(i); err != nil {
 			s.logger.Error(fmt.Errorf("OnICECandidate callback %s: %w", op, err).Error())
 			return
 		}
