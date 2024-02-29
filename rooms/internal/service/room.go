@@ -126,7 +126,7 @@ func (s *RoomService) Sync(ctx context.Context) {
 		case <-time.NewTicker(time.Second).C:
 			for _, room := range s.rooms {
 				go func(r *wrtc.Room) {
-					r.SignalAllPeers()
+					r.Sync()
 				}(room)
 			}
 		}

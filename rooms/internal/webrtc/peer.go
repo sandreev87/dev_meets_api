@@ -69,7 +69,7 @@ func (peer *Peer) InputTrackIDs() (ids []string) {
 	receivers := peer.peerConnection.GetReceivers()
 	for index, _ := range receivers {
 		for _, track := range receivers[index].Tracks() {
-			ids = append(ids, track.RID()+"_"+track.ID())
+			ids = append(ids, fmt.Sprintf("%s_%s_%s", track.Kind().String(), track.RID(), track.ID()))
 		}
 	}
 	return
@@ -102,7 +102,8 @@ func (peer *Peer) RemoveTrack(id string) error {
 }
 
 func (peer *Peer) CanAddTrack(id string) bool {
-	return strings.HasPrefix(id, peer.CurrentQuality) || strings.HasPrefix(id, AudioPrefix)
+	pref := fmt.Sprintf("video_%s", peer.CurrentQuality)
+	return strings.HasPrefix(id, pref) || strings.HasPrefix(id, AudioPrefix)
 }
 
 func (peer *Peer) Close() error {
@@ -151,18 +152,21 @@ func (peer *Peer) ListenSendEvents(ctx context.Context, callback func(string, st
 	peer.NegotiationCoordinator.ListenSendEvents(ctx, callback)
 }
 
-func (peer *Peer) Sync(outputTracks map[string]*webrtc.TrackLocalStaticRTP) bool {
+func (peer *Peer) Sync(outputTracks map[string]*webrtc.TrackLocalStaticRTP) error {
 	peer.syncMx.RLock()
 	peerChanged := false
 	existingSenders := map[string]struct{}{}
 
 	// map of sender we already are sending, so we don't double send
-	for _, id := range peer.OutputTrackIDs() {
-		existingSenders[id] = struct{}{}
+	for _, sender := range peer.peerConnection.GetSenders() {
+		if sender.Track() == nil {
+			continue
+		}
+		existingSenders[sender.Track().ID()] = struct{}{}
 
-		if _, ok := outputTracks[id]; !ok {
-			if err := peer.RemoveTrack(id); err != nil {
-				return false
+		if _, ok := outputTracks[sender.Track().ID()]; !ok {
+			if err := peer.peerConnection.RemoveTrack(sender); err != nil {
+				return err
 			}
 			peerChanged = true
 		}
@@ -179,7 +183,7 @@ func (peer *Peer) Sync(outputTracks map[string]*webrtc.TrackLocalStaticRTP) bool
 		}
 		if _, ok := existingSenders[trackID]; !ok {
 			if err := peer.AddTrack(outputTracks[trackID]); err != nil {
-				return false
+				return err
 			}
 			peerChanged = true
 		}
@@ -187,10 +191,10 @@ func (peer *Peer) Sync(outputTracks map[string]*webrtc.TrackLocalStaticRTP) bool
 
 	if peerChanged {
 		if err := peer.NegotiationCoordinator.SendOffer(); err != nil {
-			return false
+			return err
 		}
 	}
 
 	peer.syncMx.RUnlock()
-	return true
+	return nil
 }

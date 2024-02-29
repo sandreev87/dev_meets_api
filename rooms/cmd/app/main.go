@@ -3,10 +3,8 @@ package main
 import (
 	"log/slog"
 	"os"
-	"os/signal"
 	"rooms/internal/app"
 	"rooms/internal/config"
-	"syscall"
 )
 
 const (
@@ -18,22 +16,7 @@ const (
 func main() {
 	cfg := config.MustLoad()
 	log := setupLogger(cfg.Env)
-
-	application := app.New(log, cfg)
-
-	go func() {
-		application.Run()
-	}()
-
-	// Graceful shutdown
-
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT)
-
-	<-stop
-
-	application.Stop()
-	log.Info("Gracefully stopped")
+	app.New(log, cfg).Run()
 }
 
 func setupLogger(env string) *slog.Logger {

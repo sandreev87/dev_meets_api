@@ -7,7 +7,7 @@ import (
 	"sync"
 )
 
-const MaxNumberAttempts = 25
+const MaxSyncAttempts = 25
 
 type Room struct {
 	ID           string
@@ -68,26 +68,24 @@ func (r *Room) makeTrackID(t *webrtc.TrackRemote) (string, error) {
 	}
 }
 
-func (r *Room) SignalAllPeers() {
+func (r *Room) Sync() {
 	r.listLock.Lock()
-	defer func() {
-		r.listLock.Unlock()
-	}()
+	wg := sync.WaitGroup{}
 
-	for syncAttempt := 0; syncAttempt <= MaxNumberAttempts; syncAttempt++ {
-		if r.attemptSync() {
-			break
-		}
-	}
-}
-
-func (r *Room) attemptSync() bool {
 	for _, peer := range r.peers {
-		if !peer.Sync(r.outputTracks) {
-			return false
-		}
+		wg.Add(1)
+		go func(p *Peer) {
+			for syncAttempt := 0; syncAttempt <= MaxSyncAttempts; syncAttempt++ {
+				if err := p.Sync(r.outputTracks); err == nil {
+					wg.Done()
+					break
+				}
+			}
+		}(peer)
 	}
-	return true
+
+	wg.Wait()
+	r.listLock.Unlock()
 }
 
 func (r *Room) AddPeerConnection(newPeer *Peer) {

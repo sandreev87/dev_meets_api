@@ -6,8 +6,6 @@ import (
 	"auth/internal/migrator"
 	"log/slog"
 	"os"
-	"os/signal"
-	"syscall"
 )
 
 const (
@@ -18,25 +16,10 @@ const (
 
 func main() {
 	cfg := config.MustLoad()
-	log := setupLogger(cfg.Env)
-
 	migrator.Run(cfg)
 
-	application := app.New(log, cfg)
-
-	go func() {
-		application.Run()
-	}()
-
-	// Graceful shutdown
-
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT)
-
-	<-stop
-
-	application.Stop()
-	log.Info("Gracefully stopped")
+	log := setupLogger(cfg.Env)
+	app.New(log, cfg).Run()
 }
 
 func setupLogger(env string) *slog.Logger {
