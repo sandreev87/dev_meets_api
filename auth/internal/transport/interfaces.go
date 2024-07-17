@@ -13,5 +13,5 @@ type AuthorizationServiceInt interface {
 }
 
 type UserServiceInt interface {
-	CurrentUser(ctx context.Context, token string) (models.User, error)
+	CurrentUser(ctx context.Context, token string) (*models.User, error)
 }

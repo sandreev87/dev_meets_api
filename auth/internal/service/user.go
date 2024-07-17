@@ -19,14 +19,19 @@ func NewUserService(repo UserStorageInt, conf *config.Config, logger *slog.Logge
 	return &UserService{repo: repo, conf: conf, logger: logger}
 }
 
-func (s *UserService) CurrentUser(ctx context.Context, token string) (models.User, error) {
+func (s *UserService) CurrentUser(ctx context.Context, token string) (*models.User, error) {
 	const op = "service.UserService.CurrentUser"
-	uid, _ := jwt.VerifyToken(token, s.conf.Secret)
+
+	uid, err := jwt.VerifyToken(token, s.conf.Secret)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", op, err)
+	}
+
 	user, err := s.repo.User(ctx, uid)
 
 	if err != nil {
-		return user, fmt.Errorf("%s: %w", op, err)
+		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
-	return user, nil
+	return &user, nil
 }
